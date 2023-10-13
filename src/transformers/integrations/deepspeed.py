@@ -260,6 +260,34 @@ def is_deepspeed_zero3_enabled():
         return False
 
 
+def is_deepspeed_pp_enabled():
+    if _hf_deepspeed_config_weak_ref is not None and _hf_deepspeed_config_weak_ref() is not None:
+        return _hf_deepspeed_config_weak_ref().is_pp()
+    else:
+        return False
+ 
+
+def is_deepspeed_naive_pp_enabled():
+    if _hf_deepspeed_config_weak_ref is not None and _hf_deepspeed_config_weak_ref() is not None:
+        return _hf_deepspeed_config_weak_ref().is_naive_pp()
+    else:
+        return False
+    
+
+def is_deepspeed_mobius_enabled():
+    if _hf_deepspeed_config_weak_ref is not None and _hf_deepspeed_config_weak_ref() is not None:
+        return _hf_deepspeed_config_weak_ref().is_mobius()
+    else:
+        return False
+    
+
+def is_deepspeed_spiral_enabled():
+    if _hf_deepspeed_config_weak_ref is not None and _hf_deepspeed_config_weak_ref() is not None:
+        return _hf_deepspeed_config_weak_ref().is_spiral()
+    else:
+        return False   
+
+
 def deepspeed_config():
     if _hf_deepspeed_config_weak_ref is not None and _hf_deepspeed_config_weak_ref() is not None:
         return _hf_deepspeed_config_weak_ref().config

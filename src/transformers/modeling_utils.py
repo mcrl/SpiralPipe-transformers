@@ -37,7 +37,7 @@ from .activations import get_activation
 from .configuration_utils import PretrainedConfig
 from .dynamic_module_utils import custom_object_save
 from .generation import GenerationConfig, GenerationMixin
-from .integrations import PeftAdapterMixin, deepspeed_config, is_deepspeed_zero3_enabled
+from .integrations import PeftAdapterMixin, deepspeed_config, is_deepspeed_zero3_enabled, is_deepspeed_pp_enabled
 from .pytorch_utils import (  # noqa: F401
     Conv1D,
     apply_chunking_to_forward,
@@ -3077,6 +3077,10 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
             logger.info("Detected DeepSpeed ZeRO-3: activating zero.init() for this model")
             init_contexts = [deepspeed.zero.Init(config_dict_or_path=deepspeed_config())] + init_contexts
+        elif is_deepspeed_pp_enabled():
+            # TODO: init pp runtime
+            logger.info("Detected DeepSpeed PP: activating zero.init() for this model")
+            pass
         elif load_in_8bit or load_in_4bit or low_cpu_mem_usage:
             init_contexts.append(init_empty_weights())
 
