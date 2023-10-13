@@ -3078,9 +3078,10 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             logger.info("Detected DeepSpeed ZeRO-3: activating zero.init() for this model")
             init_contexts = [deepspeed.zero.Init(config_dict_or_path=deepspeed_config())] + init_contexts
         elif is_deepspeed_pp_enabled():
-            # TODO: init pp runtime
+            import deepspeed
+
             logger.info("Detected DeepSpeed PP: activating zero.init() for this model")
-            pass
+            init_contexts = [deepspeed.pipe.Init(config_dict_or_path=deepspeed_config())] + init_contexts
         elif load_in_8bit or load_in_4bit or low_cpu_mem_usage:
             init_contexts.append(init_empty_weights())
 
