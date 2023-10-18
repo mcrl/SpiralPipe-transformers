@@ -1188,6 +1188,12 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             # and memory copying it on CPU or each GPU first
             with deepspeed.zero.Init(config_dict_or_path=deepspeed_config()):
                 model = cls(config, **kwargs)
+        elif is_deepspeed_pp_enabled():
+            import deepspeed
+
+            logger.info("Detected DeepSpeed PP: activating zero.init() for this model")
+            with deepspeed.pipe.Init(config_dict_or_path=deepspeed_config()):
+                model = cls(config, **kwargs)
         else:
             model = cls(config, **kwargs)
 
@@ -3082,6 +3088,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
             logger.info("Detected DeepSpeed PP: activating zero.init() for this model")
             init_contexts = [deepspeed.pipe.Init(config_dict_or_path=deepspeed_config())] + init_contexts
+            init_contexts.append(init_empty_weights())
         elif load_in_8bit or load_in_4bit or low_cpu_mem_usage:
             init_contexts.append(init_empty_weights())
 
@@ -3090,6 +3097,12 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
         with ContextManagers(init_contexts):
             model = cls(config, *model_args, **model_kwargs)
+
+            if is_deepspeed_pp_enabled():
+                import deepspeed
+                
+                layers = deepspeed.pipe.join_layers(model)
+                # TODO(yujin): partition stages
 
         # Check first if we are `from_pt`
         if use_keep_in_fp32_modules:
