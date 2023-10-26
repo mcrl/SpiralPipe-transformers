@@ -3087,8 +3087,18 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             import deepspeed
 
             logger.info("Detected DeepSpeed PP: activating zero.init() for this model")
-            init_contexts = [deepspeed.pipe.Init(config_dict_or_path=deepspeed_config())] + init_contexts
-            init_contexts.append(init_empty_weights())
+
+            # First, init fake model without weights to provide model info to context
+            with ContextManagers([
+                no_init_weights(_enable=True),
+                init_empty_weights(),
+                deepspeed.pipe.Init(config_dict_or_path=deepspeed_config()),
+            ]):
+                fake_model = cls(config, *model_args, **model_kwargs)
+            
+            # Then, init context with fake model. 
+            # This allows the "real" model to be initialized with partioned layers.
+            init_contexts = [deepspeed.pipe.Init(module=fake_model, config_dict_or_path=deepspeed_config())] + init_contexts
         elif load_in_8bit or load_in_4bit or low_cpu_mem_usage:
             init_contexts.append(init_empty_weights())
 
@@ -3097,12 +3107,6 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
         with ContextManagers(init_contexts):
             model = cls(config, *model_args, **model_kwargs)
-
-            if is_deepspeed_pp_enabled():
-                import deepspeed
-                
-                layers = deepspeed.pipe.join_layers(model)
-                # TODO(yujin): partition stages
 
         # Check first if we are `from_pt`
         if use_keep_in_fp32_modules:
