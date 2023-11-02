@@ -561,6 +561,19 @@ def _load_state_dict_into_model(model_to_load, state_dict, start_prefix):
                     with deepspeed.zero.GatheredParameters(params_to_gather, modifier_rank=0):
                         if torch.distributed.get_rank() == 0:
                             module._load_from_state_dict(*args)
+            elif is_deepspeed_pp_enabled():
+                import deepspeed
+
+                pp_rank = torch.distributed.get_rank() % deepspeed.runtime.config.DeepSpeedConfig(deepspeed_config()).pp_config.degree
+                if pp_rank in module.ds_weight_init_pp_ranks:
+                    for name, param in module.named_parameters(recurse=False):
+                        print(f"\t{name}:" + f"{param.ds_id} {param.ds_status} {param.ds_param_type}" if param.ds_id != 0 else "")
+                    for _, param in module.named_parameters(recurse=False):
+                        param.fetch()
+                    module._load_from_state_dict(*args)
+
+                    for _, param in module.named_parameters(recurse=False):
+                        param.offload()
             else:
                 module._load_from_state_dict(*args)
 
@@ -1191,7 +1204,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         elif is_deepspeed_pp_enabled():
             import deepspeed
 
-            logger.info("Detected DeepSpeed PP: activating zero.init() for this model")
+            logger.info("Detected DeepSpeed PP: activating pipe.init() for this model")
             with deepspeed.pipe.Init(config_dict_or_path=deepspeed_config()):
                 model = cls(config, **kwargs)
         else:
@@ -1403,6 +1416,12 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         If the `torchscript` flag is set in the configuration, can't handle parameter sharing so we are cloning the
         weights instead.
         """
+        if is_deepspeed_pp_enabled():
+            """ Drop implicit weight tying for DeepSpeed PP but explicit gradient allreduce """
+            logger.info(
+                "DeepSpeed PP disables tie_weights() but take explicit gradient allreduce approach"
+            )
+            return
         if getattr(self.config, "tie_word_embeddings", True):
             output_embeddings = self.get_output_embeddings()
             if output_embeddings is not None:
@@ -1569,13 +1588,14 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 new_num_tokens = new_embeddings.weight.shape[0]
 
         # if word embeddings are not tied, make sure that lm head is resized as well
-        if self.get_output_embeddings() is not None and not self.config.tie_word_embeddings:
-            old_lm_head = self.get_output_embeddings()
-            new_lm_head = self._get_resized_lm_head(old_lm_head, new_num_tokens)
-            if hasattr(old_lm_head, "_hf_hook"):
-                hook = old_lm_head._hf_hook
-                add_hook_to_module(new_lm_head, hook)
-            self.set_output_embeddings(new_lm_head)
+        if self.get_output_embeddings() is not None:
+            if not self.config.tie_word_embeddings or is_deepspeed_pp_enabled():
+                old_lm_head = self.get_output_embeddings()
+                new_lm_head = self._get_resized_lm_head(old_lm_head, new_num_tokens)
+                if hasattr(old_lm_head, "_hf_hook"):
+                    hook = old_lm_head._hf_hook
+                    add_hook_to_module(new_lm_head, hook)
+                self.set_output_embeddings(new_lm_head)
 
         return self.get_input_embeddings()
 
@@ -1637,6 +1657,8 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
             with deepspeed.zero.GatheredParameters(old_embeddings.weight, modifier_rank=None):
                 old_num_tokens, old_embedding_dim = old_embeddings.weight.size()
+        elif is_deepspeed_pp_enabled():
+            old_num_tokens, old_embedding_dim = old_embeddings.weight.ds_shape
         else:
             old_num_tokens, old_embedding_dim = old_embeddings.weight.size()
 
@@ -1650,6 +1672,12 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 f" {nn.Embedding}."
             )
 
+        if is_deepspeed_pp_enabled():
+            # Retain old embeddings, just resize its weights
+            for _, param in old_embeddings.named_parameters(recurse=False):
+                param.resize((new_num_tokens, old_embedding_dim))
+            return old_embeddings
+        
         # Build new embeddings
 
         # When using DeepSpeed ZeRO-3, we shouldn't create new embeddings with DeepSpeed init
@@ -1715,6 +1743,8 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 old_num_tokens, old_lm_head_dim = (
                     old_lm_head.weight.size() if not transposed else old_lm_head.weight.t().size()
                 )
+        elif is_deepspeed_pp_enabled():
+            old_num_tokens, old_lm_head_dim = old_lm_head.weight.ds_shape
         else:
             old_num_tokens, old_lm_head_dim = (
                 old_lm_head.weight.size() if not transposed else old_lm_head.weight.t().size()
@@ -1729,6 +1759,12 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 " should either use a different resize function or make sure that `old_lm_head` are an instance of"
                 f" {nn.Linear}."
             )
+        
+        if is_deepspeed_pp_enabled():
+            # Retain old lm_head, just resize its weights
+            for _, param in old_lm_head.named_parameters(recurse=False):
+                param.resize((old_lm_head_dim, new_num_tokens) if not transposed else (new_num_tokens, old_lm_head_dim))
+            return old_lm_head
 
         # Build new lm head
         new_lm_head_shape = (old_lm_head_dim, new_num_tokens) if not transposed else (new_num_tokens, old_lm_head_dim)
