@@ -562,7 +562,9 @@ def _load_state_dict_into_model(model_to_load, state_dict, start_prefix):
                         if torch.distributed.get_rank() == 0:
                             module._load_from_state_dict(*args)
             elif is_deepspeed_pp_enabled():
-                if module.ds_grid.get_pipe_parallel_rank() in module.ds_weight_init_pp_ranks:
+                import deepspeed
+
+                if deepspeed.pipe.get_pipeline_parallel_rank() in module.ds_weight_init_pp_ranks:
                     for _, param in module.named_parameters(recurse=False):
                         param.fetch()
                     module._load_from_state_dict(*args)
