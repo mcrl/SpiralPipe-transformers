@@ -37,7 +37,7 @@ from .activations import get_activation
 from .configuration_utils import PretrainedConfig
 from .dynamic_module_utils import custom_object_save
 from .generation import GenerationConfig, GenerationMixin
-from .integrations import PeftAdapterMixin, deepspeed_config, is_deepspeed_zero3_enabled, is_deepspeed_pp_enabled
+from .integrations import PeftAdapterMixin, deepspeed_config, is_deepspeed_zero3_enabled, is_deepspeed_pp_opt_enabled
 from .pytorch_utils import (  # noqa: F401
     Conv1D,
     apply_chunking_to_forward,
@@ -561,7 +561,7 @@ def _load_state_dict_into_model(model_to_load, state_dict, start_prefix):
                     with deepspeed.zero.GatheredParameters(params_to_gather, modifier_rank=0):
                         if torch.distributed.get_rank() == 0:
                             module._load_from_state_dict(*args)
-            elif is_deepspeed_pp_enabled():
+            elif is_deepspeed_pp_opt_enabled():
                 import deepspeed
 
                 if deepspeed.pipe.get_pipeline_parallel_rank() in module.ds_weight_init_pp_ranks:
@@ -1198,7 +1198,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             # and memory copying it on CPU or each GPU first
             with deepspeed.zero.Init(config_dict_or_path=deepspeed_config()):
                 model = cls(config, **kwargs)
-        elif is_deepspeed_pp_enabled():
+        elif is_deepspeed_pp_opt_enabled():
             import deepspeed
 
             logger.info("Detected DeepSpeed PP: activating pipe.init() for this model")
@@ -1413,7 +1413,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         If the `torchscript` flag is set in the configuration, can't handle parameter sharing so we are cloning the
         weights instead.
         """
-        if is_deepspeed_pp_enabled():
+        if is_deepspeed_pp_opt_enabled():
             """ Drop implicit weight tying for DeepSpeed PP but explicit gradient allreduce """
             logger.info(
                 "DeepSpeed PP disables tie_weights() but take explicit gradient allreduce approach"
@@ -1586,7 +1586,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
         # if word embeddings are not tied, make sure that lm head is resized as well
         if self.get_output_embeddings() is not None:
-            if not self.config.tie_word_embeddings or is_deepspeed_pp_enabled():
+            if not self.config.tie_word_embeddings or is_deepspeed_pp_opt_enabled():
                 old_lm_head = self.get_output_embeddings()
                 new_lm_head = self._get_resized_lm_head(old_lm_head, new_num_tokens)
                 if hasattr(old_lm_head, "_hf_hook"):
@@ -1654,7 +1654,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
             with deepspeed.zero.GatheredParameters(old_embeddings.weight, modifier_rank=None):
                 old_num_tokens, old_embedding_dim = old_embeddings.weight.size()
-        elif is_deepspeed_pp_enabled():
+        elif is_deepspeed_pp_opt_enabled():
             old_num_tokens, old_embedding_dim = old_embeddings.weight.ds_shape
         else:
             old_num_tokens, old_embedding_dim = old_embeddings.weight.size()
@@ -1669,7 +1669,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 f" {nn.Embedding}."
             )
 
-        if is_deepspeed_pp_enabled():
+        if is_deepspeed_pp_opt_enabled():
             # Retain old embeddings, just resize its weights
             for _, param in old_embeddings.named_parameters(recurse=False):
                 param.resize((new_num_tokens, old_embedding_dim))
@@ -1740,7 +1740,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 old_num_tokens, old_lm_head_dim = (
                     old_lm_head.weight.size() if not transposed else old_lm_head.weight.t().size()
                 )
-        elif is_deepspeed_pp_enabled():
+        elif is_deepspeed_pp_opt_enabled():
             old_num_tokens, old_lm_head_dim = old_lm_head.weight.ds_shape
         else:
             old_num_tokens, old_lm_head_dim = (
@@ -1757,7 +1757,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 f" {nn.Linear}."
             )
         
-        if is_deepspeed_pp_enabled():
+        if is_deepspeed_pp_opt_enabled():
             # Retain old lm_head, just resize its weights
             for _, param in old_lm_head.named_parameters(recurse=False):
                 param.resize((old_lm_head_dim, new_num_tokens) if not transposed else (new_num_tokens, old_lm_head_dim))
@@ -3116,7 +3116,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
             logger.info("Detected DeepSpeed ZeRO-3: activating zero.init() for this model")
             init_contexts = [deepspeed.zero.Init(config_dict_or_path=deepspeed_config())] + init_contexts
-        elif is_deepspeed_pp_enabled():
+        elif is_deepspeed_pp_opt_enabled():
             import deepspeed
 
             logger.info("Detected DeepSpeed PP: activating zero.init() for this model")

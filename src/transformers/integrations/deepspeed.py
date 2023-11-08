@@ -260,9 +260,9 @@ def is_deepspeed_zero3_enabled():
         return False
 
 
-def is_deepspeed_pp_enabled():
+def is_deepspeed_pp_opt_enabled():
     if _hf_deepspeed_config_weak_ref is not None and _hf_deepspeed_config_weak_ref() is not None:
-        return _hf_deepspeed_config_weak_ref().is_pp()
+        return _hf_deepspeed_config_weak_ref().is_pp_opt()
     else:
         return False
  
